@@ -33,12 +33,12 @@ import java.util.Objects;
             full = true,
             code = """
                 id: mistral
-                namespace: company.name
+                namespace: company.team
 
                 tasks:
                   - id: chat_completion
                     type: io.kestra.plugin.mistral.ChatCompletion
-                    apiKey: '{{ secret("MISTRAL_API_KEY") }}'
+                    apiKey: "{{ secret('MISTRAL_API_KEY') }}"
                     modelName: open-mistral-7b
                     messages:
                       - type: SYSTEM
