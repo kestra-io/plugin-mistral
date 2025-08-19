@@ -1,5 +1,6 @@
 package io.kestra.plugin.mistral;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
@@ -11,8 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.*;
 
 @KestraTest
 public class ChatCompletionTest {
@@ -46,5 +46,55 @@ public class ChatCompletionTest {
 
         assertThat(output.getResponse(), notNullValue());
         assertThat(output.getResponse(), containsString("Paris"));
+    }
+
+    @EnabledIfEnvironmentVariable(named = "MISTRAL_API_KEY", matches = ".*")
+    @Test
+    void shouldGetStructuredJsonWithSchema() throws Exception {
+        var schema = """
+            {
+              "type": "object",
+              "title": "Book",
+              "additionalProperties": false,
+              "required": ["name", "authors"],
+              "properties": {
+                "name": { "type": "string" },
+                "authors": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+            """;
+
+        var runContext = runContextFactory.of(Map.of(
+            "apiKey", MISTRAL_API_KEY,
+            "modelName", "ministral-8b-latest",
+            "messages", List.of(
+                ChatCompletion.ChatMessage.builder()
+                    .type(ChatCompletion.ChatMessageType.USER)
+                    .content("I recently read 'To Kill a Mockingbird' by Harper Lee.")
+                    .build()
+            ),
+            "jsonResponseSchema", schema
+        ));
+
+        var task = ChatCompletion.builder()
+            .apiKey(Property.ofExpression("{{ apiKey }}"))
+            .modelName(Property.ofExpression("{{ modelName }}"))
+            .messages(Property.ofExpression("{{ messages }}"))
+            .jsonResponseSchema(Property.ofExpression("{{ jsonResponseSchema }}"))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getResponse(), notNullValue());
+        assertThat(output.getRaw(), notNullValue());
+
+        var mapper = new ObjectMapper();
+        var node = mapper.readTree(output.getResponse());
+
+        assertThat(node.path("name").isTextual(), is(true));
+        assertThat(node.path("authors").isArray(), is(true));
+
+        assertThat(node.path("name").asText(), containsString("Mockingbird"));
+        assertThat(node.path("authors").get(0).asText(), containsString("Harper Lee"));
     }
 }
