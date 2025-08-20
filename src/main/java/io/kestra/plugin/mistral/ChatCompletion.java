@@ -195,7 +195,7 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
 
     public enum ChatMessageType {
         SYSTEM("system"),
-        AI("assistant"),
+        ASSISTANT("assistant"),
         USER("user");
 
         private final String role;
