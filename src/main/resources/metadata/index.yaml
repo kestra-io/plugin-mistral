@@ -1,0 +1,8 @@
+group: io.kestra.plugin.mistral
+name: "mistral"
+title: "Mistral"
+description: "A plugin to use Mistral."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
