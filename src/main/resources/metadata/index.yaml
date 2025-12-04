@@ -1,8 +1,8 @@
 group: io.kestra.plugin.mistral
 name: "mistral"
 title: "Mistral"
-description: "A plugin to use Mistral."
-body: ""
+description: "Tasks that send chat completions to Mistral models."
+body: "Provide your Mistral API key, pick a model, and supply message prompts to generate responses with token usage that can be logged or passed to later tasks."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
