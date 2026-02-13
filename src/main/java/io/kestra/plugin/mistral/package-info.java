@@ -1,7 +1,8 @@
 @PluginSubGroup(
     title = "Mistral plugin",
-    description = "A plugin to use Mistral.",
-    categories = PluginSubGroup.PluginCategory.AI
+    description = "A plugin to use Mistral.",categories = {
+        PluginSubGroup.PluginCategory.AI
+    }
 )
 package io.kestra.plugin.mistral;
 
