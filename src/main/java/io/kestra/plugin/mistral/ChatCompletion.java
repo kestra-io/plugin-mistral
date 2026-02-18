@@ -83,29 +83,31 @@ import java.util.Objects;
         )
     }
 )
+@Schema(
+    title = "Send chat completions to Mistral",
+    description = "Calls Mistral's /chat/completions endpoint with templated messages, returning the first choice's content and raw JSON. Requires a bearer API key; defaults to https://api.mistral.ai/v1. When a JSON schema is provided, the task wraps it in the json_schema response_format with strict=true."
+)
 public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.Output> {
 
-    @Schema(title = "API Key", description = "The Mistral API key used for authentication")
+    @Schema(title = "API key", description = "Bearer token for the Mistral API; keep in a secret variable.")
     @NotNull
     private Property<String> apiKey;
 
-    @Schema(title = "Model", description = "The Mistral model to use (e.g. mistral-small, mistral-medium, mistral-large-latest)")
+    @Schema(title = "Model name", description = "Mistral model identifier such as mistral-small, mistral-medium, mistral-large-latest, or ministral variants.")
     @NotNull
     private Property<String> modelName;
 
-    @Schema(title = "Base URL", description = "The base URL of the Mistral API")
+    @Schema(title = "Base URL", description = "API base URL; defaults to `https://api.mistral.ai/v1` and the task appends /chat/completions.")
     @Builder.Default
     private Property<String> baseUrl = Property.ofValue("https://api.mistral.ai/v1");
 
-    @Schema(title = "Messages", description = "List of chat messages in conversational order")
+    @Schema(title = "Messages", description = "Chat messages rendered by the RunContext in order; each message needs a type (system, user, assistant) and content.")
     @NotNull
     private Property<List<ChatMessage>> messages;
 
     @Schema(
         title = "JSON Response Schema",
-        description = "JSON schema (as string) to force a custom Structured Output. " +
-            "If provided, the request will include response_format = { type: \"json_schema\", json_schema: { schema, name, strict } } " +
-            "as described in Mistral documentation."
+        description = "Optional JSON schema string to request structured output; wrapped as `response_format.type=json_schema` with `name=kestra_schema` and `strict=true`. The returned content stays a JSON string for compatibility."
     )
     private Property<String> jsonResponseSchema;
 
