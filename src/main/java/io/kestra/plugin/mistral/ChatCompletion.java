@@ -1,9 +1,17 @@
 package io.kestra.plugin.mistral;
 
+import java.io.IOException;
+import java.net.URI;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
@@ -13,17 +21,11 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-
-import java.io.IOException;
-import java.net.URI;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 @SuperBuilder
 @Getter
@@ -120,10 +122,12 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
         var rJsonResponseSchema = runContext.render(jsonResponseSchema).as(String.class).orElse(null);
 
         var formattedMessages = rMessages.stream()
-            .map(msg -> Map.of(
-                "role", msg.type().role(),
-                "content", Objects.toString(msg.content(), "")
-            ))
+            .map(
+                msg -> Map.of(
+                    "role", msg.type().role(),
+                    "content", Objects.toString(msg.content(), "")
+                )
+            )
             .toList();
 
         // Build the request body as mutable in order to add response_format if needed
@@ -175,8 +179,8 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
         // { type: "json_schema", json_schema: { schema, name, strict } }
         ObjectNode jsonSchemaWrapper = mapper.createObjectNode();
         jsonSchemaWrapper.set("schema", schemaNode);
-        jsonSchemaWrapper.put("name", "kestra_schema");  // arbitrary name required by the API
-        jsonSchemaWrapper.put("strict", true);           // strict = true is recommended
+        jsonSchemaWrapper.put("name", "kestra_schema"); // arbitrary name required by the API
+        jsonSchemaWrapper.put("strict", true); // strict = true is recommended
 
         ObjectNode responseFormat = mapper.createObjectNode();
         responseFormat.put("type", "json_schema");

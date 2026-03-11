@@ -1,6 +1,6 @@
 @PluginSubGroup(
     title = "Mistral plugin",
-    description = "A plugin to use Mistral.",categories = {
+    description = "A plugin to use Mistral.", categories = {
         PluginSubGroup.PluginCategory.AI
     }
 )
