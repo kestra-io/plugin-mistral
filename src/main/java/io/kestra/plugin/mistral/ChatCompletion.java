@@ -26,6 +26,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @Getter
@@ -93,24 +94,29 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
 
     @Schema(title = "API key", description = "Bearer token for the Mistral API; keep in a secret variable.")
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> apiKey;
 
     @Schema(title = "Model name", description = "Mistral model identifier such as mistral-small, mistral-medium, mistral-large-latest, or ministral variants.")
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> modelName;
 
     @Schema(title = "Base URL", description = "API base URL; defaults to `https://api.mistral.ai/v1` and the task appends /chat/completions.")
     @Builder.Default
+    @PluginProperty(group = "connection")
     private Property<String> baseUrl = Property.ofValue("https://api.mistral.ai/v1");
 
     @Schema(title = "Messages", description = "Chat messages rendered by the RunContext in order; each message needs a type (system, user, assistant) and content.")
     @NotNull
+    @PluginProperty(group = "main")
     private Property<List<ChatMessage>> messages;
 
     @Schema(
         title = "JSON Response Schema",
         description = "Optional JSON schema string to request structured output; wrapped as `response_format.type=json_schema` with `name=kestra_schema` and `strict=true`. The returned content stays a JSON string for compatibility."
     )
+    @PluginProperty(group = "connection")
     private Property<String> jsonResponseSchema;
 
     @Override
