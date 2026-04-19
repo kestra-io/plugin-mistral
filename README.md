@@ -35,15 +35,18 @@
 </p>
 <p align="center" style="color:grey;"><i>Get started with Kestra in 4 minutes.</i></p>
 
-
 # Kestra Mistral Plugin
 
-> A plugin to use [Mistral](https://mistral.ai/) API with Kestra.
+## Why
 
-This repository allows to user Mistral capabilities (eg: text and chat completions) with Kestra.
+- What user problem does this solve? Teams need to send chat completions to Mistral models from orchestrated workflows instead of relying on manual console work, ad hoc scripts, or disconnected schedulers.
+- Why would a team adopt this plugin in a workflow? It keeps Mistral steps in the same Kestra flow as upstream preparation, approvals, retries, notifications, and downstream systems.
+- What operational/business outcome does it enable? It reduces manual handoffs and fragmented tooling while improving reliability, traceability, and delivery speed for processes that depend on Mistral.
 
-![Kestra orchestrator](https://kestra.io/video.gif)
+## What
 
+- Provides plugin components under `io.kestra.plugin.mistral`.
+- Includes classes such as `ChatCompletion`.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)
