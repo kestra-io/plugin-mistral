@@ -94,7 +94,7 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
 
     @Schema(title = "API key", description = "Bearer token for the Mistral API; keep in a secret variable.")
     @NotNull
-    @PluginProperty(group = "main")
+    @PluginProperty(group = "main", secret = true)
     private Property<String> apiKey;
 
     @Schema(title = "Model name", description = "Mistral model identifier such as mistral-small, mistral-medium, mistral-large-latest, or ministral variants.")
