@@ -26,6 +26,10 @@ Infrastructure dependencies (Docker Compose services):
 ### Key Plugin Classes
 
 - `io.kestra.plugin.mistral.ChatCompletion`
+- `io.kestra.plugin.mistral.RunWorkflow` — starts a Mistral Workflow execution (sync or fire-and-forget); polls until terminal state when `wait: true`
+- `io.kestra.plugin.mistral.WorkflowEvents` — polling trigger that emits one Kestra execution per matching Mistral workflow event (cursor-based, cold-start safe)
+
+> **Note:** Mistral Workflows is currently in public preview. Register workflows via the Mistral Python SDK or Studio before using `RunWorkflow` or `WorkflowEvents`.
 
 ### Project Structure
 

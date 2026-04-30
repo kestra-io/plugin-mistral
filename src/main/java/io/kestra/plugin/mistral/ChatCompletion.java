@@ -1,7 +1,5 @@
 package io.kestra.plugin.mistral;
 
-import java.io.IOException;
-import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,27 +10,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
-import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @Getter
 @NoArgsConstructor
 @ToString
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = true)
 @Plugin(
     examples = {
         @Example(
@@ -90,22 +84,12 @@ import io.kestra.core.models.annotations.PluginProperty;
     title = "Send chat completions to Mistral",
     description = "Calls Mistral's /chat/completions endpoint with templated messages, returning the first choice's content and raw JSON. Requires a bearer API key; defaults to https://api.mistral.ai/v1. When a JSON schema is provided, the task wraps it in the json_schema response_format with strict=true."
 )
-public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.Output> {
-
-    @Schema(title = "API key", description = "Bearer token for the Mistral API; keep in a secret variable.")
-    @NotNull
-    @PluginProperty(group = "main", secret = true)
-    private Property<String> apiKey;
+public class ChatCompletion extends AbstractMistralConnection implements RunnableTask<ChatCompletion.Output> {
 
     @Schema(title = "Model name", description = "Mistral model identifier such as mistral-small, mistral-medium, mistral-large-latest, or ministral variants.")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> modelName;
-
-    @Schema(title = "Base URL", description = "API base URL; defaults to `https://api.mistral.ai/v1` and the task appends /chat/completions.")
-    @Builder.Default
-    @PluginProperty(group = "connection")
-    private Property<String> baseUrl = Property.ofValue("https://api.mistral.ai/v1");
 
     @Schema(title = "Messages", description = "Chat messages rendered by the RunContext in order; each message needs a type (system, user, assistant) and content.")
     @NotNull
@@ -116,14 +100,12 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
         title = "JSON Response Schema",
         description = "Optional JSON schema string to request structured output; wrapped as `response_format.type=json_schema` with `name=kestra_schema` and `strict=true`. The returned content stays a JSON string for compatibility."
     )
-    @PluginProperty(group = "connection")
+    @PluginProperty(group = "advanced")
     private Property<String> jsonResponseSchema;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
         var rModelName = runContext.render(modelName).as(String.class).orElseThrow();
-        var rBaseUrl = runContext.render(baseUrl).as(String.class).orElse("https://api.mistral.ai/v1");
         var rMessages = runContext.render(messages).asList(ChatMessage.class);
         var rJsonResponseSchema = runContext.render(jsonResponseSchema).as(String.class).orElse(null);
 
@@ -147,34 +129,20 @@ public class ChatCompletion extends Task implements RunnableTask<ChatCompletion.
             requestBody.put("response_format", responseFormat);
         }
 
-        try (var client = new HttpClient(runContext, HttpConfiguration.builder().build())) {
-            var request = HttpRequest.builder()
-                .uri(URI.create(rBaseUrl + "/chat/completions"))
-                .addHeader("Authorization", "Bearer " + rApiKey)
-                .addHeader("Content-Type", "application/json")
-                .method("POST")
-                .body(HttpRequest.JsonRequestBody.builder().content(requestBody).build())
-                .build();
+        var responseBody = executeRequest(runContext, "POST", "/chat/completions", requestBody);
 
-            var response = client.request(request, ObjectNode.class);
+        var content = responseBody
+            .path("choices")
+            .path(0)
+            .path("message")
+            .path("content")
+            .asText();
 
-            if (response.getStatus().getCode() >= 400) {
-                throw new IOException("Mistral API error: " + response.getBody());
-            }
-
-            var content = response.getBody()
-                .path("choices")
-                .path(0)
-                .path("message")
-                .path("content")
-                .asText();
-
-            // The message.content returned by the API remains a JSON string; Output is unchanged for compatibility
-            return Output.builder()
-                .response(content)
-                .raw(response.getBody().toString())
-                .build();
-        }
+        // The message.content returned by the API remains a JSON string; Output is unchanged for compatibility
+        return Output.builder()
+            .response(content)
+            .raw(responseBody.toString())
+            .build();
     }
 
     private static ObjectNode getJsonNodes(String jsonResponseSchema) throws JsonProcessingException {

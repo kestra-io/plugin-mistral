@@ -46,7 +46,9 @@
 ## What
 
 - Provides plugin components under `io.kestra.plugin.mistral`.
-- Includes classes such as `ChatCompletion`.
+- Includes classes such as `ChatCompletion`, `RunWorkflow`, and `WorkflowEvents`.
+
+> **Note:** Mistral Workflows is currently in public preview. Register workflows via the Mistral Python SDK or Studio before using the `RunWorkflow` task or the `WorkflowEvents` trigger.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)
