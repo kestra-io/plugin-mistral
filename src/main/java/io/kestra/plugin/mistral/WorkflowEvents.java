@@ -64,7 +64,7 @@ import lombok.experimental.SuperBuilder;
     description = """
         Polls the Mistral Workflows event list endpoint on a fixed interval and emits one Kestra execution per matched event.
 
-        **Note:** Mistral Workflows is currently in public preview.
+        **Note**: Mistral Workflows is currently in public preview.
 
         On the **first poll** (no cursor stored), the trigger fetches the current event page, stores the `next_cursor`, and emits **nothing** — this avoids flooding Kestra with historical events.
         From the second poll onwards, only new events are returned and filtered against `eventTypes` and `workflowName`.

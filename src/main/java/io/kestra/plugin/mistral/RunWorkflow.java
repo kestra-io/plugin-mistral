@@ -73,7 +73,7 @@ import lombok.experimental.SuperBuilder;
     description = """
         Starts a Mistral Workflow execution via the REST API and optionally waits for it to reach a terminal state.
 
-        **Note:** Mistral Workflows is currently in public preview. Register workflows via the Mistral Python SDK or Studio before using this task.
+        **Note**: Mistral Workflows is currently in public preview. Register workflows via the Mistral Python SDK or Studio before using this task.
 
         When `wait` is `true` (default), the task polls every `pollInterval` until the execution completes, fails, or `waitTimeout` is reached.
         For long-running workflows (over 15 minutes), set `wait: false` and use the `WorkflowEvents` trigger to react to completion.
