@@ -55,7 +55,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: log_event
-                    type: io.kestra.core.tasks.log.Log
+                    type: io.kestra.plugin.core.log.Log
                     message: "Workflow {{ trigger.workflowExecId }} ended with event {{ trigger.eventType }}"
                 """
         )
