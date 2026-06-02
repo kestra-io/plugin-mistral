@@ -1,9 +1,7 @@
 package io.kestra.plugin.mistral;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +20,10 @@ import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.storages.kv.KVMetadata;
+import io.kestra.core.storages.kv.KVStore;
+import io.kestra.core.storages.kv.KVValue;
+import io.kestra.core.storages.kv.KVValueAndMetadata;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
@@ -72,8 +74,7 @@ import lombok.experimental.SuperBuilder;
 )
 public class WorkflowEvents extends AbstractTrigger implements PollingTriggerInterface, TriggerOutput<WorkflowEvents.Output> {
 
-    private static final String CURSOR_STORE = "mistral-workflow-events";
-    private static final String CURSOR_FILE = "cursor";
+    private static final String CURSOR_KV_KEY = "mistral_workflow_events_cursor";
 
     @Schema(title = "API key", description = "Bearer token for the Mistral API; keep in a secret variable.")
     @PluginProperty(group = "connection", secret = true)
@@ -203,23 +204,21 @@ public class WorkflowEvents extends AbstractTrigger implements PollingTriggerInt
         }
     }
 
-    @SuppressWarnings("deprecation")
     private String loadCursor(RunContext runContext) {
         try {
-            var stream = runContext.stateStore().getState(CURSOR_STORE, CURSOR_FILE, null);
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (FileNotFoundException e) {
-            return null;
+            KVStore kvStore = runContext.namespaceKv(runContext.flowInfo().namespace());
+            Optional<KVValue> value = kvStore.getValue(CURSOR_KV_KEY);
+            return value.map(v -> v.value().toString()).orElse(null);
         } catch (IOException | ResourceExpiredException e) {
             runContext.logger().warn("Failed to load cursor state: {}", e.getMessage());
             return null;
         }
     }
 
-    @SuppressWarnings("deprecation")
     private void saveCursor(RunContext runContext, String cursor) {
         try {
-            runContext.stateStore().putState(CURSOR_STORE, CURSOR_FILE, null, cursor.getBytes(StandardCharsets.UTF_8));
+            KVStore kvStore = runContext.namespaceKv(runContext.flowInfo().namespace());
+            kvStore.put(CURSOR_KV_KEY, new KVValueAndMetadata(new KVMetadata(null, (Duration) null), cursor), true);
         } catch (IOException e) {
             runContext.logger().warn("Failed to save cursor state: {}", e.getMessage());
         }
