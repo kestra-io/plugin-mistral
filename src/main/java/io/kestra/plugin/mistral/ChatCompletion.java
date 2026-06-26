@@ -165,7 +165,10 @@ public class ChatCompletion extends AbstractMistralConnection implements Runnabl
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
+        @Schema(title = "Assistant response text extracted from the completion")
         private final String response;
+
+        @Schema(title = "Raw response body returned by the Mistral API")
         private final String raw;
     }
 
