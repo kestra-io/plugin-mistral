@@ -153,7 +153,7 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
     @Builder.Default
-    private final AtomicBoolean remoteCancelIssued = new AtomicBoolean(false);
+    private final AtomicBoolean cancelDispatched = new AtomicBoolean(false);
 
     @JsonIgnore
     @Getter(AccessLevel.NONE)
@@ -197,9 +197,9 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     private void cancelRemoteExecution() {
         var remoteCancel = killable.get();
 
-        // Nothing to cancel yet: leave remoteCancelIssued unset, or the dispatch from run() once the execution
+        // Nothing to cancel yet: leave cancelDispatched unset, or the dispatch from run() once the execution
         // id is known would be silently skipped.
-        if (!isKilled.get() || remoteCancel == null || !remoteCancelIssued.compareAndSet(false, true)) {
+        if (!isKilled.get() || remoteCancel == null || !cancelDispatched.compareAndSet(false, true)) {
             return;
         }
 
