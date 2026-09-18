@@ -38,42 +38,55 @@ public abstract class AbstractMistralConnection extends Task {
     protected Property<String> baseUrl = Property.ofValue(DEFAULT_BASE_URL);
 
     protected ObjectNode executeRequest(RunContext runContext, String method, String path, Object body) throws Exception {
-        var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var rBaseUrl = runContext.render(baseUrl).as(String.class).orElse(DEFAULT_BASE_URL);
+        return client(runContext).execute(method, path, body);
+    }
 
-        return executeRequest(runContext, rApiKey, rBaseUrl, method, path, body, HttpConfiguration.builder().build());
+    protected Client client(RunContext runContext) throws Exception {
+        return client(runContext, HttpConfiguration.builder().build());
     }
 
     /**
-     * Takes already-rendered credentials so a caller running off the worker thread never renders a secret
-     * Property: every render of a secret mutates the run context's shared, unsynchronized mask list.
+     * Resolves the credentials once. A caller running off the worker thread must reuse the returned client
+     * instead of rendering again: every render of a secret mutates the run context's shared, unsynchronized
+     * mask list.
      */
-    protected ObjectNode executeRequest(
-        RunContext runContext,
-        String rApiKey,
-        String rBaseUrl,
-        String method,
-        String path,
-        Object body,
-        HttpConfiguration configuration) throws Exception {
-        try (var client = new HttpClient(runContext, configuration)) {
-            var requestBuilder = HttpRequest.builder()
-                .uri(URI.create(rBaseUrl + path))
-                .addHeader("Authorization", "Bearer " + rApiKey)
-                .addHeader("Content-Type", "application/json")
-                .method(method);
+    protected Client client(RunContext runContext, HttpConfiguration configuration) throws Exception {
+        return new Client(
+            runContext,
+            runContext.render(apiKey).as(String.class).orElseThrow(),
+            runContext.render(baseUrl).as(String.class).orElse(DEFAULT_BASE_URL),
+            configuration
+        );
+    }
 
-            if (body != null) {
-                requestBuilder.body(HttpRequest.JsonRequestBody.builder().content(body).build());
+    protected record Client(RunContext runContext, String apiKey, String baseUrl, HttpConfiguration configuration) {
+
+        ObjectNode execute(String method, String path, Object body) throws Exception {
+            try (var client = new HttpClient(runContext, configuration)) {
+                var requestBuilder = HttpRequest.builder()
+                    .uri(URI.create(baseUrl + path))
+                    .addHeader("Authorization", "Bearer " + apiKey)
+                    .addHeader("Content-Type", "application/json")
+                    .method(method);
+
+                if (body != null) {
+                    requestBuilder.body(HttpRequest.JsonRequestBody.builder().content(body).build());
+                }
+
+                var response = client.request(requestBuilder.build(), ObjectNode.class);
+
+                if (response.getStatus().getCode() >= 400) {
+                    throw new IOException("Mistral API error " + response.getStatus().getCode() + ": " + response.getBody());
+                }
+
+                return response.getBody();
             }
+        }
 
-            var response = client.request(requestBuilder.build(), ObjectNode.class);
-
-            if (response.getStatus().getCode() >= 400) {
-                throw new IOException("Mistral API error " + response.getStatus().getCode() + ": " + response.getBody());
-            }
-
-            return response.getBody();
+        // The record's generated toString would print the API key.
+        @Override
+        public String toString() {
+            return "Client[baseUrl=" + baseUrl + "]";
         }
     }
 }

@@ -206,12 +206,14 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         Thread.ofVirtual().name("mistral-run-workflow-cancel").start(remoteCancel);
     }
 
-    private void cancelExecution(RunContext runContext, String rApiKey, String rBaseUrl, String execId) {
+    private void cancelExecution(Client client, String execId) {
+        var logger = client.runContext().logger();
+
         try {
-            executeRequest(runContext, rApiKey, rBaseUrl, "POST", "/workflows/executions/" + execId + "/cancel", null, CANCEL_HTTP_CONFIGURATION);
-            runContext.logger().info("Requested cancellation of Mistral workflow execution '{}'", execId);
+            client.execute("POST", "/workflows/executions/" + execId + "/cancel", null);
+            logger.info("Requested cancellation of Mistral workflow execution '{}'", execId);
         } catch (Exception e) {
-            runContext.logger().warn("Failed to cancel Mistral workflow execution '{}', it may still be running", execId, e);
+            logger.warn("Failed to cancel Mistral workflow execution '{}', it may still be running", execId, e);
         }
     }
 
@@ -232,10 +234,6 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         var rWait = runContext.render(wait).as(Boolean.class).orElse(true);
         var rWaitTimeout = runContext.render(waitTimeout).as(Duration.class).orElse(Duration.ofMinutes(15));
         var rPollInterval = runContext.render(pollInterval).as(Duration.class).orElse(Duration.ofSeconds(5));
-
-        // Rendered here, on the worker thread, so the cancel dispatched from kill() never renders a secret.
-        var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var rBaseUrl = runContext.render(baseUrl).as(String.class).orElse(DEFAULT_BASE_URL);
 
         var requestBody = MAPPER.createObjectNode();
         requestBody.set("input", MAPPER.valueToTree(rInput));
@@ -263,7 +261,9 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
                 .build();
         }
 
-        killable.set(() -> cancelExecution(runContext, rApiKey, rBaseUrl, execId));
+        // Resolved here, on the worker thread, so the cancel dispatched from kill() never renders a secret.
+        var cancelClient = client(runContext, CANCEL_HTTP_CONFIGURATION);
+        killable.set(() -> cancelExecution(cancelClient, execId));
 
         // A kill landing between the execute call and the line above found nothing to cancel, so dispatch it here.
         if (isCancelled()) {
