@@ -5,11 +5,19 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import io.kestra.core.exceptions.KilledException;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -79,7 +87,11 @@ import lombok.experimental.SuperBuilder;
         For long-running workflows (over 15 minutes), set `wait: false` and use the `WorkflowEvents` trigger to react to completion.
 
         Terminal success statuses: `COMPLETED`, `CANCELED`, `CONTINUED_AS_NEW`.
-        Terminal failure statuses: `FAILED`, `TIMED_OUT`, `TERMINATED` — these cause the task to throw an exception.
+        Terminal failure statuses that make the task throw an exception: `FAILED`, `TIMED_OUT`, `TERMINATED`.
+
+        Killing the task stops the poll loop and requests cancellation of the Mistral execution, so a killed Kestra task does not leave it running.
+        A worker shutdown only stops the poll loop: it is not the user cancelling, so the Mistral execution is left running.
+        Both apply only when `wait` is `true`, since a `wait: false` execution is deliberately detached.
         """
 )
 public class RunWorkflow extends AbstractMistralConnection implements RunnableTask<RunWorkflow.Output> {
@@ -87,6 +99,15 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     private static final Set<String> RUNNING_STATUSES = Set.of("RUNNING", "RETRYING_AFTER_ERROR");
     private static final Set<String> FAILURE_STATUSES = Set.of("FAILED", "TIMED_OUT", "TERMINATED");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static final HttpConfiguration CANCEL_HTTP_CONFIGURATION = HttpConfiguration.builder()
+        .timeout(
+            TimeoutConfiguration.builder()
+                .connectTimeout(Property.ofValue(Duration.ofSeconds(10)))
+                .readIdleTimeout(Property.ofValue(Duration.ofSeconds(10)))
+                .build()
+        )
+        .build();
 
     @Schema(title = "Workflow identifier", description = "The name or ID of the registered Mistral workflow to execute.")
     @NotNull
@@ -120,6 +141,90 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     @PluginProperty(group = "reliability")
     private Property<Duration> pollInterval = Property.ofValue(Duration.ofSeconds(5));
 
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final AtomicBoolean isKilled = new AtomicBoolean(false);
+
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final AtomicBoolean cancelDispatched = new AtomicBoolean(false);
+
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final AtomicReference<Runnable> killable = new AtomicReference<>();
+
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final CountDownLatch cancelSignal = new CountDownLatch(1);
+
+    @Override
+    public void kill() {
+        isKilled.set(true);
+        cancelSignal.countDown();
+        cancelRemoteExecution();
+    }
+
+    /**
+     * Worker shutdown, not a user cancel: release the poll loop but leave the Mistral execution running, an
+     * attempt resubmitted onto another worker expects to find it alive. Must stay non-blocking.
+     */
+    @Override
+    public void stop() {
+        cancelSignal.countDown();
+    }
+
+    private boolean isCancelled() {
+        return cancelSignal.getCount() == 0;
+    }
+
+    /**
+     * Cancels the Mistral execution, on a kill only. The request goes out on a virtual thread because kill()
+     * runs on the worker lifecycle thread and must not block, and because a slow /cancel must not pin a shared
+     * pool thread. Delivery is best-effort, an abrupt worker exit can cut it off before it reaches Mistral.
+     */
+    private void cancelRemoteExecution() {
+        var remoteCancel = killable.get();
+
+        // Nothing to cancel yet: leave cancelDispatched unset, or the dispatch from run() once the execution
+        // id is known would be silently skipped.
+        if (!isKilled.get() || remoteCancel == null || !cancelDispatched.compareAndSet(false, true)) {
+            return;
+        }
+
+        Thread.ofVirtual().name("mistral-run-workflow-cancel").start(remoteCancel);
+    }
+
+    private void cancelExecution(Client client, String execId) {
+        var logger = client.runContext().logger();
+
+        try {
+            client.execute("POST", "/workflows/executions/" + execId + "/cancel", null);
+            logger.info("Requested cancellation of Mistral workflow execution '{}'", execId);
+        } catch (Exception e) {
+            logger.warn("Failed to cancel Mistral workflow execution '{}', it may still be running", execId, e);
+        }
+    }
+
+    private Exception cancelled(String execId) {
+        if (isKilled.get()) {
+            return new KilledException("Mistral workflow execution '" + execId + "' was killed, cancellation has been requested");
+        }
+
+        return new Exception("Stopped polling Mistral workflow execution '" + execId + "' because the worker is shutting down, the execution is still running on Mistral");
+    }
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rWorkflowIdentifier = runContext.render(workflowIdentifier).as(String.class).orElseThrow();
@@ -140,6 +245,10 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
             requestBody.put("execution_id", rExecutionId);
         }
 
+        if (isCancelled()) {
+            throw new KilledException("Task was cancelled before the Mistral workflow execution was started");
+        }
+
         var startResponse = executeRequest(runContext, "POST", "/workflows/" + rWorkflowIdentifier + "/execute", requestBody);
         var execId = startResponse.path("execution_id").asText();
 
@@ -152,6 +261,16 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
                 .build();
         }
 
+        // Resolved here, on the worker thread, so the cancel dispatched from kill() never renders a secret.
+        var cancelClient = client(runContext, CANCEL_HTTP_CONFIGURATION);
+        killable.set(() -> cancelExecution(cancelClient, execId));
+
+        // A kill landing between the execute call and the line above found nothing to cancel, so dispatch it here.
+        if (isCancelled()) {
+            cancelRemoteExecution();
+            throw cancelled(execId);
+        }
+
         return pollUntilTerminal(runContext, execId, rWaitTimeout, rPollInterval);
     }
 
@@ -159,6 +278,10 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         var deadline = Instant.now().plus(timeout);
 
         while (true) {
+            if (isCancelled()) {
+                throw cancelled(execId);
+            }
+
             var statusResponse = executeRequest(runContext, "GET", "/workflows/executions/" + execId, null);
             var status = statusResponse.path("status").asText();
 
@@ -174,8 +297,16 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
                 throw new TimeoutException("Mistral workflow execution '" + execId + "' did not reach a terminal state within " + timeout);
             }
 
-            runContext.logger().debug("Execution '{}' status: {} — waiting {}s", execId, status, interval.getSeconds());
-            Thread.sleep(interval.toMillis());
+            runContext.logger().debug("Execution '{}' status: {}, waiting {}s", execId, status, interval.getSeconds());
+
+            try {
+                if (cancelSignal.await(interval.toMillis(), TimeUnit.MILLISECONDS)) {
+                    throw cancelled(execId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
         }
     }
 
