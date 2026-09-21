@@ -31,7 +31,6 @@ public abstract class AbstractMistralConnection extends Task {
     @NotNull
     @PluginProperty(group = "connection", secret = true)
     @ToString.Exclude
-    @EqualsAndHashCode.Exclude
     protected Property<String> apiKey;
 
     @Schema(title = "Base URL", description = "API base URL; defaults to `https://api.mistral.ai/v1`.")
