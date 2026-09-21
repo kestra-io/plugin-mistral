@@ -100,7 +100,7 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     private static final Set<String> FAILURE_STATUSES = Set.of("FAILED", "TIMED_OUT", "TERMINATED");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final HttpConfiguration CANCEL_HTTP_CONFIGURATION = HttpConfiguration.builder()
+    private static final HttpConfiguration BOUNDED_HTTP_CONFIGURATION = HttpConfiguration.builder()
         .timeout(
             TimeoutConfiguration.builder()
                 .connectTimeout(Property.ofValue(Duration.ofSeconds(10)))
@@ -217,6 +217,14 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         }
     }
 
+    private Exception cancelledBeforeStart() {
+        if (isKilled.get()) {
+            return new KilledException("Task was killed before the Mistral workflow execution was started");
+        }
+
+        return new Exception("Task was stopped before the Mistral workflow execution was started because the worker is shutting down");
+    }
+
     private Exception cancelled(String execId) {
         if (isKilled.get()) {
             return new KilledException("Mistral workflow execution '" + execId + "' was killed, cancellation has been requested");
@@ -246,7 +254,7 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         }
 
         if (isCancelled()) {
-            throw new KilledException("Task was cancelled before the Mistral workflow execution was started");
+            throw cancelledBeforeStart();
         }
 
         var startResponse = executeRequest(runContext, "POST", "/workflows/" + rWorkflowIdentifier + "/execute", requestBody);
@@ -262,7 +270,7 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
         }
 
         // Resolved here, on the worker thread, so the cancel dispatched from kill() never renders a secret.
-        var cancelClient = client(runContext, CANCEL_HTTP_CONFIGURATION);
+        var cancelClient = client(runContext, BOUNDED_HTTP_CONFIGURATION);
         killable.set(() -> cancelExecution(cancelClient, execId));
 
         // A kill landing between the execute call and the line above found nothing to cancel, so dispatch it here.
@@ -277,12 +285,16 @@ public class RunWorkflow extends AbstractMistralConnection implements RunnableTa
     private Output pollUntilTerminal(RunContext runContext, String execId, Duration timeout, Duration interval) throws Exception {
         var deadline = Instant.now().plus(timeout);
 
+        // Bounded, and resolved once: an unbounded GET would leave run() blocked after kill() dispatched the
+        // cancel, so the task run would never reach a terminal state.
+        var pollClient = client(runContext, BOUNDED_HTTP_CONFIGURATION);
+
         while (true) {
             if (isCancelled()) {
                 throw cancelled(execId);
             }
 
-            var statusResponse = executeRequest(runContext, "GET", "/workflows/executions/" + execId, null);
+            var statusResponse = pollClient.execute("GET", "/workflows/executions/" + execId, null);
             var status = statusResponse.path("status").asText();
 
             if (!RUNNING_STATUSES.contains(status)) {

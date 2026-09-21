@@ -9,8 +9,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -94,6 +96,23 @@ public class RunWorkflowTest {
             task.kill();
 
             assertThrows(KilledException.class, () -> task.run(runContextFactory.of(Map.of())));
+            assertThat(stub.requests(), is(empty()));
+        } finally {
+            stub.close();
+        }
+    }
+
+    @Test
+    void shouldNotReportAWorkerShutdownBeforeRunAsAKill() throws Exception {
+        var stub = startStub(Duration.ZERO);
+
+        try {
+            var task = task(stub, Duration.ofSeconds(1), true);
+            task.stop();
+
+            var thrown = assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
+
+            assertThat(thrown, not(instanceOf(KilledException.class)));
             assertThat(stub.requests(), is(empty()));
         } finally {
             stub.close();
@@ -200,6 +219,30 @@ public class RunWorkflowTest {
     }
 
     @Test
+    void shouldPollUntilTheExecutionCompletes() throws Exception {
+        var stub = startStub(Duration.ZERO);
+
+        try {
+            stub.statusBody().set(
+                "{\"status\":\"COMPLETED\",\"result\":{\"answer\":42},"
+                    + "\"start_time\":\"2026-01-01T00:00:00Z\",\"end_time\":\"2026-01-01T00:00:02Z\"}"
+            );
+
+            var output = task(stub, Duration.ofSeconds(1), true).run(runContextFactory.of(Map.of()));
+
+            assertThat(output.getExecutionId(), is(EXEC_ID));
+            assertThat(output.getStatus(), is("COMPLETED"));
+            assertThat(output.getResult(), is("{\"answer\":42}"));
+            assertThat(output.getStartTime(), is("2026-01-01T00:00:00Z"));
+            assertThat(output.getEndTime(), is("2026-01-01T00:00:02Z"));
+            assertThat(output.getTotalDurationMs(), is(2000L));
+            assertThat(stub.cancelCount(), is(0L));
+        } finally {
+            stub.close();
+        }
+    }
+
+    @Test
     void shouldLeaveADetachedExecutionRunningOnKill() throws Exception {
         var stub = startStub(Duration.ZERO);
 
@@ -253,9 +296,11 @@ public class RunWorkflowTest {
         var cancelCompleted = new CountDownLatch(1);
         var executeReceived = new CountDownLatch(1);
         var executeGate = new CountDownLatch(gateExecute ? 1 : 0);
+        var statusBody = new AtomicReference<>("{\"status\":\"RUNNING\"}");
 
         var server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
-        server.setExecutor(Executors.newCachedThreadPool());
+        var executor = Executors.newCachedThreadPool();
+        server.setExecutor(executor);
         server.createContext("/v1/workflows", exchange ->
         {
             var path = exchange.getRequestURI().getPath();
@@ -275,7 +320,7 @@ public class RunWorkflowTest {
                 body = "{}";
             } else {
                 statusPolled.countDown();
-                body = "{\"status\":\"RUNNING\"}";
+                body = statusBody.get();
             }
 
             var bytes = body.getBytes(StandardCharsets.UTF_8);
@@ -291,7 +336,7 @@ public class RunWorkflowTest {
         });
         server.start();
 
-        return new Stub(server, requests, statusPolled, cancelReceived, cancelCompleted, executeReceived, executeGate);
+        return new Stub(server, executor, requests, statusPolled, cancelReceived, cancelCompleted, executeReceived, executeGate, statusBody);
     }
 
     private static void awaitQuietly(CountDownLatch latch) {
@@ -316,12 +361,14 @@ public class RunWorkflowTest {
 
     private record Stub(
         HttpServer server,
+        ExecutorService executor,
         List<String> requests,
         CountDownLatch statusPolled,
         CountDownLatch cancelReceived,
         CountDownLatch cancelCompleted,
         CountDownLatch executeReceived,
-        CountDownLatch executeGate) {
+        CountDownLatch executeGate,
+        AtomicReference<String> statusBody) {
         String baseUrl() {
             return "http://localhost:" + server.getAddress().getPort() + "/v1";
         }
@@ -337,6 +384,8 @@ public class RunWorkflowTest {
             }
 
             server.stop(0);
+            // stop() leaves an executor supplied through setExecutor running.
+            executor.shutdownNow();
         }
     }
 }
